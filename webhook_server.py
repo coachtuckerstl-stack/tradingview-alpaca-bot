@@ -24,6 +24,9 @@ WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "coachsq_secret_123")
 DATABASE_URL = os.getenv("DATABASE_URL")
 db_engine = create_engine(DATABASE_URL) if DATABASE_URL else None
 
+print(f"DATABASE_URL loaded: {'YES' if DATABASE_URL else 'NO'}")
+print(f"Database engine ready: {'YES' if db_engine else 'NO'}")
+
 ALLOWED_SYMBOLS = {
     s.strip().upper()
     for s in os.getenv("BOT_ALLOWED_SYMBOLS", "AMD,TSLA,QQQ").split(",")
@@ -282,6 +285,7 @@ def log_db_event(
     raw_payload=None,
 ):
     if db_engine is None:
+        print("Database log skipped: db_engine is None")
         return
 
     try:
@@ -321,7 +325,7 @@ def log_db_event(
                 },
             )
     except Exception as e:
-        print(f"Database log failed: {e}")
+        print(f"Database log failed: {e}", flush=True)
 
 
 @app.post("/webhook")
