@@ -2,6 +2,8 @@ import csv
 import os
 from datetime import datetime
 from zoneinfo import ZoneInfo
+import json
+from sqlalchemy import create_engine, text
 
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request
@@ -19,6 +21,8 @@ ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY", "")
 ALPACA_PAPER = os.getenv("ALPACA_PAPER", "true").lower() == "true"
 
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "coachsq_secret_123")
+DATABASE_URL = os.getenv("DATABASE_URL")
+db_engine = create_engine(DATABASE_URL) if DATABASE_URL else None
 
 ALLOWED_SYMBOLS = {
     s.strip().upper()
@@ -262,39 +266,183 @@ def home():
         "accepted_trades_today": accepted_trades_today(),
     })
 
+def log_db_event(
+    event_type,
+    symbol=None,
+    side=None,
+    strategy=None,
+    model=None,
+    status=None,
+    qty=None,
+    entry=None,
+    stop_loss=None,
+    take_profit=None,
+    order_id=None,
+    message=None,
+    raw_payload=None,
+):
+    if db_engine is None:
+        return
+
+    try:
+        payload_text = None
+        if raw_payload is not None:
+            payload_text = json.dumps(raw_payload)
+
+        with db_engine.begin() as conn:
+            conn.execute(
+                text("""
+                    INSERT INTO bot_events (
+                        bot_name, event_type, symbol, side, strategy, model,
+                        status, qty, entry, stop_loss, take_profit,
+                        order_id, message, raw_payload
+                    )
+                    VALUES (
+                        :bot_name, :event_type, :symbol, :side, :strategy, :model,
+                        :status, :qty, :entry, :stop_loss, :take_profit,
+                        :order_id, :message, :raw_payload
+                    )
+                """),
+                {
+                    "bot_name": "TradingView Bot - QQQ TSLA AMD",
+                    "event_type": event_type,
+                    "symbol": symbol,
+                    "side": side,
+                    "strategy": strategy,
+                    "model": model,
+                    "status": status,
+                    "qty": qty,
+                    "entry": entry,
+                    "stop_loss": stop_loss,
+                    "take_profit": take_profit,
+                    "order_id": order_id,
+                    "message": message,
+                    "raw_payload": payload_text,
+                },
+            )
+    except Exception as e:
+        print(f"Database log failed: {e}")
+
 
 @app.post("/webhook")
 def webhook():
     payload = request.get_json(silent=True)
 
     if not isinstance(payload, dict):
+        log_db_event(
+            event_type="WEBHOOK_REJECTED",
+            status="REJECTED",
+            message="Invalid JSON payload",
+            raw_payload=payload,
+        )
         return jsonify({"ok": False, "error": "Invalid JSON payload"}), 400
 
     symbol = str(payload.get("symbol", "")).upper()
     side_text = str(payload.get("side", "")).lower()
+    strategy = payload.get("strategy")
+    model = payload.get("model")
+
+    log_db_event(
+        event_type="WEBHOOK_RECEIVED",
+        symbol=symbol,
+        side=side_text,
+        strategy=strategy,
+        model=model,
+        status="RECEIVED",
+        message="TradingView webhook received",
+        raw_payload=payload,
+    )
 
     try:
         symbol, side_text, side, entry, stop_loss, take_profit, qty = validate_payload(payload)
 
         if accepted_trades_today() >= MAX_TOTAL_TRADES_PER_DAY:
             reason = "Max total trades per day reached."
+
             log_event(symbol, side_text, entry, stop_loss, take_profit, qty, "REJECTED", reason, payload)
+
+            log_db_event(
+                event_type="TRADE_REJECTED",
+                symbol=symbol,
+                side=side_text,
+                strategy=strategy,
+                model=model,
+                status="REJECTED",
+                qty=qty,
+                entry=entry,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                message=reason,
+                raw_payload=payload,
+            )
+
             return jsonify({"ok": False, "rejected": reason}), 200
 
         if accepted_trades_today(symbol) >= MAX_TRADES_PER_SYMBOL_PER_DAY:
             reason = f"Max trades reached today for {symbol}."
+
             log_event(symbol, side_text, entry, stop_loss, take_profit, qty, "REJECTED", reason, payload)
+
+            log_db_event(
+                event_type="TRADE_REJECTED",
+                symbol=symbol,
+                side=side_text,
+                strategy=strategy,
+                model=model,
+                status="REJECTED",
+                qty=qty,
+                entry=entry,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                message=reason,
+                raw_payload=payload,
+            )
+
             return jsonify({"ok": False, "rejected": reason}), 200
 
         if has_open_position(symbol):
             reason = f"Already in open position for {symbol}."
+
             log_event(symbol, side_text, entry, stop_loss, take_profit, qty, "REJECTED", reason, payload)
+
+            log_db_event(
+                event_type="TRADE_REJECTED",
+                symbol=symbol,
+                side=side_text,
+                strategy=strategy,
+                model=model,
+                status="REJECTED",
+                qty=qty,
+                entry=entry,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                message=reason,
+                raw_payload=payload,
+            )
+
             return jsonify({"ok": False, "rejected": reason}), 200
 
         order = submit_bracket_order(symbol, side, qty, stop_loss, take_profit)
 
         reason = f"Submitted Alpaca paper bracket order: {order.id}"
+
         log_event(symbol, side_text, entry, stop_loss, take_profit, qty, "ACCEPTED", reason, payload)
+
+        log_db_event(
+            event_type="TRADE_PLACED",
+            symbol=symbol,
+            side=side_text,
+            strategy=strategy,
+            model=model,
+            status="ACCEPTED",
+            qty=qty,
+            entry=entry,
+            stop_loss=stop_loss,
+            take_profit=take_profit,
+            order_id=str(order.id),
+            message=reason,
+            raw_payload=payload,
+        )
 
         return jsonify({
             "ok": True,
@@ -309,7 +457,20 @@ def webhook():
 
     except Exception as e:
         reason = str(e)
+
         log_event(symbol, side_text, "", "", "", "", "REJECTED", reason, payload)
+
+        log_db_event(
+            event_type="ERROR",
+            symbol=symbol,
+            side=side_text,
+            strategy=strategy,
+            model=model,
+            status="ERROR",
+            message=reason,
+            raw_payload=payload,
+        )
+
         return jsonify({"ok": False, "error": reason}), 400
 
 
