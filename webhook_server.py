@@ -4,6 +4,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import json
 from sqlalchemy import create_engine, text
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request
@@ -54,6 +55,69 @@ def health():
         "bot": "TradingView Bot - QQQ TSLA AMD",
         "status": "online"
     }, 200
+
+@app.route("/db-test", methods=["GET"])
+def db_test():
+    if not DATABASE_URL:
+        return {
+            "ok": False,
+            "error": "DATABASE_URL is not loaded",
+            "database_url_loaded": False,
+        }, 500
+
+    try:
+        parsed = urlparse(DATABASE_URL)
+        db_host = parsed.hostname
+
+        if db_engine is None:
+            return {
+                "ok": False,
+                "error": "db_engine is None",
+                "database_url_loaded": True,
+                "db_host": db_host,
+            }, 500
+
+        with db_engine.begin() as conn:
+            conn.execute(
+                text("""
+                    INSERT INTO bot_events (
+                        bot_name,
+                        event_type,
+                        symbol,
+                        side,
+                        strategy,
+                        model,
+                        status,
+                        message
+                    )
+                    VALUES (
+                        'TradingView Bot - QQQ TSLA AMD',
+                        'DB_TEST',
+                        'AMD',
+                        'buy',
+                        'database_test',
+                        'railway_db_test',
+                        'SUCCESS',
+                        'Manual DB test inserted from Railway TradingView bot'
+                    )
+                """)
+            )
+
+        return {
+            "ok": True,
+            "database_url_loaded": True,
+            "db_host": db_host,
+            "message": "DB test insert successful",
+        }, 200
+
+    except Exception as e:
+        parsed = urlparse(DATABASE_URL)
+        return {
+            "ok": False,
+            "database_url_loaded": True,
+            "db_host": parsed.hostname,
+            "error": str(e),
+        }, 500
 
 trading_client = TradingClient(
     api_key=ALPACA_API_KEY,
