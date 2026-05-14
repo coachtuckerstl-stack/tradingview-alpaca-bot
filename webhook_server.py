@@ -40,6 +40,14 @@ EASTERN = ZoneInfo("America/New_York")
 
 app = Flask(__name__)
 
+@app.route("/health", methods=["GET"])
+def health():
+    return {
+        "ok": True,
+        "bot": "TradingView Bot - QQQ TSLA AMD",
+        "status": "online"
+    }, 200
+
 trading_client = TradingClient(
     api_key=ALPACA_API_KEY,
     secret_key=ALPACA_SECRET_KEY,
