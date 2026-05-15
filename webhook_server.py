@@ -1,6 +1,6 @@
 import csv
 import os
-from datetime import datetime
+from datetime import datetime, time
 from zoneinfo import ZoneInfo
 import json
 from sqlalchemy import create_engine, text
@@ -45,6 +45,24 @@ AUTO_TARGET_DOLLARS = float(os.getenv("BOT_AUTO_TARGET_DOLLARS", "3.00"))
 
 LOG_FILE = "trade_log.csv"
 EASTERN = ZoneInfo("America/New_York")
+
+# ==============================
+# Trading Window Protection
+# ==============================
+
+ALLOW_NEW_TRADES_AFTER = time(9, 45)
+STOP_NEW_TRADES_AFTER = time(15, 30)
+
+def trading_time_allowed():
+    now = datetime.now(EASTERN).time()
+
+    if now < ALLOW_NEW_TRADES_AFTER:
+        return False, "Trading blocked — before 9:45 AM ET"
+
+    if now >= STOP_NEW_TRADES_AFTER:
+        return False, "Trading blocked — after 3:30 PM ET"
+
+    return True, "Trading window approved"
 
 app = Flask(__name__)
 
@@ -423,6 +441,28 @@ def webhook():
 
     try:
         symbol, side_text, side, entry, stop_loss, take_profit, qty = validate_payload(payload)
+
+                time_ok, time_reason = trading_time_allowed()
+
+        if not time_ok:
+            log_event(symbol, side_text, entry, stop_loss, take_profit, qty, "REJECTED", time_reason, payload)
+
+            log_db_event(
+                event_type="TRADE_REJECTED",
+                symbol=symbol,
+                side=side_text,
+                strategy=strategy,
+                model=model,
+                status="REJECTED",
+                qty=qty,
+                entry=entry,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                message=time_reason,
+                raw_payload=payload,
+            )
+
+            return jsonify({"ok": False, "rejected": time_reason}), 200
 
         if accepted_trades_today() >= MAX_TOTAL_TRADES_PER_DAY:
             reason = "Max total trades per day reached."
