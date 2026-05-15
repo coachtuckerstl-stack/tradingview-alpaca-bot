@@ -442,7 +442,7 @@ def webhook():
     try:
         symbol, side_text, side, entry, stop_loss, take_profit, qty = validate_payload(payload)
 
-                time_ok, time_reason = trading_time_allowed()
+        time_ok, time_reason = trading_time_allowed()
 
         if not time_ok:
             log_event(symbol, side_text, entry, stop_loss, take_profit, qty, "REJECTED", time_reason, payload)
