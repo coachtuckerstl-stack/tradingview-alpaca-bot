@@ -14,6 +14,7 @@ from alpaca.trading.enums import OrderClass, OrderSide, OrderType, TimeInForce
 from alpaca.trading.requests import MarketOrderRequest, TakeProfitRequest, StopLossRequest
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockLatestTradeRequest
+from trade_logger import log_trade_event
 
 load_dotenv()
 
@@ -335,7 +336,30 @@ def submit_bracket_order(symbol, side, qty, stop_loss, take_profit):
         stop_loss=StopLossRequest(stop_price=round(stop_loss, 2)),
     )
 
-    return trading_client.submit_order(order_data=order)
+    submitted_order = trading_client.submit_order(order_data=order)
+
+    log_trade_event(
+        bot_group="TV_WEBHOOK",
+        strategy="ha_100ema_doji_v1",
+        model="tv_ha_100ema_doji_live_v1",
+        symbol=symbol,
+        side=str(side),
+        qty=qty,
+        entry_price="",
+        stop_loss=round(stop_loss, 2),
+        take_profit=round(take_profit, 2),
+        status="ORDER_SUBMITTED",
+        order_id=getattr(submitted_order, "id", ""),
+        raw_payload={
+            "symbol": symbol,
+            "side": str(side),
+            "qty": qty,
+            "stop_loss": round(stop_loss, 2),
+            "take_profit": round(take_profit, 2),
+        },
+    )
+
+    return submitted_order
 
 
 @app.get("/")
