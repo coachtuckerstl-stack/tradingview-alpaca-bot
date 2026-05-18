@@ -234,6 +234,30 @@ def get_float(payload, key):
         raise ValueError(f"Missing field: {key}")
     return float(payload[key])
 
+def get_alert_price_from_payload(payload):
+    for key in ("price", "entry", "close"):
+        value = payload.get(key)
+        if value not in (None, ""):
+            try:
+                return float(value)
+            except Exception:
+                pass
+    return None
+
+
+def attach_price_audit(payload, alert_price, alpaca_live_price):
+    payload["tv_alert_price"] = alert_price
+    payload["alpaca_live_price"] = alpaca_live_price
+
+    if alert_price and alpaca_live_price:
+        diff = round(alpaca_live_price - alert_price, 4)
+        diff_pct = round((diff / alert_price) * 100, 4)
+        payload["price_diff"] = diff
+        payload["price_diff_pct"] = diff_pct
+    else:
+        payload["price_diff"] = None
+        payload["price_diff_pct"] = None
+
 
 def get_side(side_text):
     side_text = str(side_text).lower().strip()
@@ -297,10 +321,15 @@ def validate_payload(payload):
     side_text = str(payload.get("side", "")).lower().strip()
     side = get_side(side_text)
 
+    alert_price = get_alert_price_from_payload(payload)
+
     if USE_LIVE_ENTRY_PRICE:
         entry = round(get_live_price(symbol), 2)
     else:
-        entry = get_float(payload, "entry")
+        entry = alert_price if alert_price is not None else get_float(payload, "entry")
+
+    attach_price_audit(payload, alert_price, entry)
+
 
     if AUTO_BRACKET:
         if side == OrderSide.BUY:
