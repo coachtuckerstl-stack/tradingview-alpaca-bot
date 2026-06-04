@@ -200,25 +200,32 @@ def log_event(symbol, side, entry, stop_loss, take_profit, qty, status, reason, 
 
 
 def accepted_trades_today(symbol=None):
-    ensure_log()
-    count = 0
+    # Count from the bot_events Postgres table rather than the local CSV,
+    # which is wiped whenever Railway restarts the container.
+    if db_engine is None:
+        print("accepted_trades_today: db_engine is None, returning 0", flush=True)
+        return 0
 
-    with open(LOG_FILE, "r", newline="") as f:
-        reader = csv.DictReader(f)
-
-        for row in reader:
-            if row.get("date_et") != today():
-                continue
-
-            if row.get("status") != "ACCEPTED":
-                continue
-
-            if symbol and row.get("symbol") != symbol:
-                continue
-
-            count += 1
-
-    return count
+    try:
+        with db_engine.connect() as conn:
+            result = conn.execute(
+                text("""
+                    SELECT COUNT(*)
+                    FROM bot_events
+                    WHERE date(created_at) = current_date
+                      AND status = 'ACCEPTED'
+                      AND bot_name = :bot_name
+                      AND (:symbol IS NULL OR symbol = :symbol)
+                """),
+                {
+                    "bot_name": "TradingView Bot - QQQ TSLA AMD",
+                    "symbol": symbol,
+                },
+            )
+            return result.scalar() or 0
+    except Exception as e:
+        print(f"accepted_trades_today query failed: {e}", flush=True)
+        return 0
 
 
 def has_open_position(symbol):
