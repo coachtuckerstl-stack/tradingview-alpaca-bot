@@ -40,7 +40,7 @@ MAX_TRADES_PER_SYMBOL_PER_DAY = int(os.getenv("BOT_MAX_TRADES_PER_SYMBOL_PER_DAY
 RISK_DOLLARS_PER_TRADE = float(os.getenv("BOT_RISK_DOLLARS_PER_TRADE", "2"))
 MAX_SHARES_PER_TRADE = int(os.getenv("BOT_MAX_SHARES_PER_TRADE", "5"))
 USE_LIVE_ENTRY_PRICE = os.getenv("BOT_USE_LIVE_ENTRY_PRICE", "true").lower() == "true"
-AUTO_BRACKET = os.getenv("BOT_AUTO_BRACKET", "true").lower() == "true"
+AUTO_BRACKET = os.getenv("BOT_AUTO_BRACKET", "false").lower() == "true"
 AUTO_STOP_DOLLARS = float(os.getenv("BOT_AUTO_STOP_DOLLARS", "1.50"))
 AUTO_TARGET_DOLLARS = float(os.getenv("BOT_AUTO_TARGET_DOLLARS", "3.00"))
 
@@ -278,41 +278,15 @@ def get_side(side_text):
     raise ValueError(f"Invalid side: {side_text}")
 
 
-def calculate_qty(entry, stop_loss):
-    risk_per_share = abs(entry - stop_loss)
-
-    if risk_per_share <= 0:
-        raise ValueError("Invalid risk per share.")
-
-    qty = int(RISK_DOLLARS_PER_TRADE // risk_per_share)
-
-    if qty < 1:
-        raise ValueError(
-            f"Risk per share ${risk_per_share:.2f} is too high for "
-            f"${RISK_DOLLARS_PER_TRADE:.2f} risk."
-        )
-
-    qty = min(qty, MAX_SHARES_PER_TRADE)
-    return qty
-
-def get_live_price(symbol):
+def calculate_qty(entry, stop_loss=None):
+    """Use fixed $20 notional fractional size for apples-to-apples paper testing."""
     try:
-        request_params = StockLatestTradeRequest(symbol_or_symbols=symbol)
-        latest_trade = data_client.get_stock_latest_trade(request_params)
-
-        if isinstance(latest_trade, dict):
-            trade = latest_trade.get(symbol)
-        else:
-            trade = latest_trade
-
-        if trade is None:
-            raise ValueError(f"No latest trade found for {symbol}")
-
-        return float(trade.price)
-
-    except Exception as e:
-        raise ValueError(f"Could not get live price for {symbol}: {e}")
-
+        entry = float(entry)
+        if entry <= 0:
+            return 0
+        return round(MAX_DOLLARS_PER_TRADE / entry, 6)
+    except Exception:
+        return 0
 
 def validate_payload(payload):
     secret = str(payload.get("secret", ""))
@@ -361,42 +335,15 @@ def validate_payload(payload):
 
 
 def submit_bracket_order(symbol, side, qty, stop_loss, take_profit):
+    """Submit simple fractional market order. Stop/target are logged for bot-managed exits later."""
     order = MarketOrderRequest(
         symbol=symbol,
         qty=qty,
         side=side,
-        type=OrderType.MARKET,
-        time_in_force=TimeInForce.DAY,
-        order_class=OrderClass.BRACKET,
-        take_profit=TakeProfitRequest(limit_price=round(take_profit, 2)),
-        stop_loss=StopLossRequest(stop_price=round(stop_loss, 2)),
+        time_in_force=TimeInForce.DAY
     )
-
     submitted_order = trading_client.submit_order(order_data=order)
-
-    log_trade_event(
-        bot_group="TV_WEBHOOK",
-        strategy="ha_100ema_doji_v1",
-        model="tv_ha_100ema_doji_live_v1",
-        symbol=symbol,
-        side=str(side),
-        qty=qty,
-        entry_price="",
-        stop_loss=round(stop_loss, 2),
-        take_profit=round(take_profit, 2),
-        status="ORDER_SUBMITTED",
-        order_id=getattr(submitted_order, "id", ""),
-        raw_payload={
-            "symbol": symbol,
-            "side": str(side),
-            "qty": qty,
-            "stop_loss": round(stop_loss, 2),
-            "take_profit": round(take_profit, 2),
-        },
-    )
-
     return submitted_order
-
 
 @app.get("/")
 def home():
@@ -645,3 +592,14 @@ def webhook():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
+
+def calculate_fractional_qty(entry_price):
+    """Return fractional share qty for fixed $20 notional paper testing."""
+    try:
+        entry_price = float(entry_price)
+        if entry_price <= 0:
+            return 0
+        return round(MAX_DOLLARS_PER_TRADE / entry_price, 6)
+    except Exception:
+        return 0
