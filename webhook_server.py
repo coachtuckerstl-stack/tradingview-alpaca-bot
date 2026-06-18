@@ -305,7 +305,6 @@ def validate_payload(payload):
     alert_price = get_alert_price_from_payload(payload)
 
     if USE_LIVE_ENTRY_PRICE:
-    if USE_LIVE_ENTRY_PRICE:
         try:
             entry = round(float(payload.get("price")), 2)
         except Exception:
@@ -607,4 +606,5 @@ def calculate_fractional_qty(entry_price):
         return round(MAX_DOLLARS_PER_TRADE / entry_price, 6)
     except Exception:
         return 0
+
 
