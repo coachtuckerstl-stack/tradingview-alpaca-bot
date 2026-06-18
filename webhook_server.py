@@ -305,7 +305,10 @@ def validate_payload(payload):
     alert_price = get_alert_price_from_payload(payload)
 
     if USE_LIVE_ENTRY_PRICE:
-        entry = round(get_live_price(symbol), 2)
+                try:
+            entry = round(float(data.get("price")), 2)
+        except Exception:
+            return jsonify({"ok": False, "error": "missing or invalid price"}), 400
     else:
         entry = alert_price if alert_price is not None else get_float(payload, "entry")
 
@@ -603,3 +606,4 @@ def calculate_fractional_qty(entry_price):
         return round(MAX_DOLLARS_PER_TRADE / entry_price, 6)
     except Exception:
         return 0
+
