@@ -305,11 +305,13 @@ def validate_payload(payload):
     alert_price = get_alert_price_from_payload(payload)
 
     if USE_LIVE_ENTRY_PRICE:
-                try:
-            entry = round(float(data.get("price")), 2)
+    if USE_LIVE_ENTRY_PRICE:
+        try:
+            entry = round(float(payload.get("price")), 2)
         except Exception:
-            return jsonify({"ok": False, "error": "missing or invalid price"}), 400
+            raise ValueError("missing or invalid price")
     else:
+        entry = alert_price if alert_price is not None else get_float(payload, "entry")
         entry = alert_price if alert_price is not None else get_float(payload, "entry")
 
     attach_price_audit(payload, alert_price, entry)
