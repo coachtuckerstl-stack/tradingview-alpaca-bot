@@ -312,7 +312,6 @@ def validate_payload(payload):
             raise ValueError("missing or invalid price")
     else:
         entry = alert_price if alert_price is not None else get_float(payload, "entry")
-        entry = alert_price if alert_price is not None else get_float(payload, "entry")
 
     attach_price_audit(payload, alert_price, entry)
 
